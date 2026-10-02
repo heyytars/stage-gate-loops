@@ -6,12 +6,16 @@ stages:
   - name: preflight
     gates:
       - name: tools
-        run: sgl gate preflight --cmd python3 --cmd git
+        run: sgl gate preflight --cmd python3 --cmd git --cmd gitleaks --cmd bandit
 
-  - name: secrets
+  - name: security
     gates:
-      - name: gitleaks
-        run: gitleaks detect --source . --no-banner --redact
+      - name: no-secrets-in-history
+        run: gitleaks git . --no-banner --redact
+      - name: static-analysis
+        # -ll: fail on medium or high severity. Low findings (subprocess use)
+        # are expected in a tool whose job is running commands.
+        run: bandit -r src -ll -q
 
   - name: code
     gates:
@@ -23,4 +27,11 @@ stages:
   - name: docs
     gates:
       - name: no-em-dash-in-docs
-        run: sgl gate no-pattern README.md adapters/claude-code/README.md adapters/github-action/README.md -p "\u2014"
+        run: sgl gate no-pattern README.md SECURITY.md docs/how-it-works.md bench/README.md adapters/claude-code/README.md adapters/github-action/README.md -p "\u2014"
+      - name: images-match-their-script
+        # The SVGs are generated. If someone edits a label in build.py and
+        # forgets to re-run it, the README shows a stale picture. This catches it.
+        run: >-
+          python3 assets/build.py >/dev/null &&
+          test -z "$(git status --porcelain -- assets)" ||
+          (echo "assets changed but are not committed: run python3 assets/build.py, then commit the result"; git status --short -- assets; exit 1)

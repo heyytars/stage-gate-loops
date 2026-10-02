@@ -12,6 +12,8 @@ import os
 import re
 import shutil
 import sys
+import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 from typing import Any, Callable, Dict, List
@@ -199,9 +201,12 @@ def preflight(argv: List[str]) -> int:
     bad = [f"command not found: {c}" for c in a.cmd if not shutil.which(c)]
     bad += [f"env var not set: {e}" for e in a.env if not os.environ.get(e)]
     for u in a.url:
+        if urllib.parse.urlsplit(u).scheme not in ("http", "https"):
+            bad.append(f"{u}: only http(s) URLs are allowed")
+            continue
         try:
             req = urllib.request.Request(u, method="HEAD", headers={"User-Agent": "sgl-preflight"})
-            with urllib.request.urlopen(req, timeout=a.timeout) as r:
+            with urllib.request.urlopen(req, timeout=a.timeout) as r:  # nosec B310: scheme checked above
                 if r.status >= 500:
                     bad.append(f"{u}: HTTP {r.status}")
         except urllib.error.HTTPError as e:
@@ -221,23 +226,30 @@ def cap(argv: List[str]) -> int:
     With --record, appends an entry when the gate passes, so place it as the
     gate right before the side effect."""
     import datetime as dt
+    import fcntl
     ap = argparse.ArgumentParser(prog="sgl gate cap")
     ap.add_argument("--ledger", required=True)
     ap.add_argument("--key", required=True)
     ap.add_argument("--max", type=int, required=True)
     ap.add_argument("--record", action="store_true")
     a = ap.parse_args(argv)
+    if "\t" in a.key or "\n" in a.key:
+        return _fail("key must not contain tabs or newlines")
     today = dt.date.today().isoformat()
     led = Path(a.ledger)
-    rows = led.read_text().splitlines() if led.exists() else []
-    used = sum(1 for r in rows if r.split("\t")[:2] == [today, a.key])
-    if used >= a.max:
-        return _fail(f"cap reached for '{a.key}': {used}/{a.max} today")
-    if a.record:
-        led.parent.mkdir(parents=True, exist_ok=True)
-        with led.open("a") as f:
+    led.parent.mkdir(parents=True, exist_ok=True)
+    # Count-then-append must be atomic, or two runs fired at once both see
+    # "2/3 used" and both send. An exclusive lock makes the cap a real cap.
+    with open(led, "a+") as f:
+        fcntl.flock(f, fcntl.LOCK_EX)
+        f.seek(0)
+        used = sum(1 for r in f.read().splitlines() if r.split("\t")[:2] == [today, a.key])
+        if used >= a.max:
+            return _fail(f"cap reached for '{a.key}': {used}/{a.max} today")
+        if a.record:
             f.write(f"{today}\t{a.key}\n")
-        used += 1
+            f.flush()
+            used += 1
     return _ok(f"'{a.key}' {used}/{a.max} today")
 
 

@@ -11,6 +11,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import signal
 import subprocess
 import sys
 import time
@@ -19,6 +21,8 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
+
+from .redact import redact, secret_values
 
 FEEDBACK_LIMIT = 4000  # chars of gate output handed back on retry
 
@@ -64,6 +68,8 @@ def load(path: str) -> Pipeline:
     for i, s in enumerate(data["stages"]):
         if not isinstance(s, dict) or not s.get("name"):
             raise PipelineError(f"stage #{i + 1} needs a 'name'")
+        if not isinstance(s["name"], str) or CONTROL.search(s["name"]):
+            raise PipelineError(f"stage #{i + 1}: name must be text on one line")
         if s["name"] in seen:
             raise PipelineError(f"duplicate stage name: {s['name']}")
         seen.add(s["name"])
@@ -83,38 +89,88 @@ def load(path: str) -> Pipeline:
 
     workdir = (p.parent / data.get("workdir", ".")).resolve()
     env = {str(k): str(v) for k, v in (data.get("env") or {}).items()}
-    return Pipeline(name=data.get("name", p.stem), stages=stages, workdir=workdir, env=env)
+    name = str(data.get("name", p.stem))
+    # The name becomes a file name under .sgl/. Refuse anything that could
+    # climb out of it ("../../x") or hide (".x").
+    if not SAFE_NAME.fullmatch(name):
+        raise PipelineError(f"pipeline name must match {SAFE_NAME.pattern}: {name!r}")
+    return Pipeline(name=name, stages=stages, workdir=workdir, env=env)
+
+
+SAFE_NAME = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,99}")
+CONTROL = re.compile(r"[\x00-\x1f\x7f]")
 
 
 def _sh(cmd: str, cwd: Path, env: Dict[str, str], timeout: int) -> subprocess.CompletedProcess:
     # shell=True is deliberate: commands come from the pipeline file the user
     # wrote and trusts, exactly like a Makefile or a CI config. sgl never
     # interpolates untrusted input into them; feedback travels via env vars.
+    #
+    # Each command gets its own process group, so a timeout kills the whole
+    # tree, not just the shell (otherwise `sleep 600 &` outlives the gate).
+    # All output is redacted HERE, the single choke point, before it can reach
+    # the console, the log, $SGL_FEEDBACK or a CI job summary.
+    proc = subprocess.Popen(  # nosec B602 - shell is the product: a gate IS a shell command,
+        # exactly like a CI `run:` step or a Makefile recipe. sgl never builds a
+        # command from untrusted input; commands come from the pipeline file, and
+        # values reach the command as environment variables, not as interpolated text.
+        cmd, shell=True, cwd=str(cwd), env=env, start_new_session=True,
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        text=True, errors="replace")
     try:
-        return subprocess.run(cmd, shell=True, cwd=str(cwd), env=env, timeout=timeout,
-                              stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    except subprocess.TimeoutExpired as e:
-        out = e.stdout if isinstance(e.stdout, str) else (e.stdout or b"").decode(errors="replace")
-        return subprocess.CompletedProcess(cmd, 124, out + f"\n[sgl] timed out after {timeout}s", None)
+        out, _ = proc.communicate(timeout=timeout)
+        code = proc.returncode
+    except subprocess.TimeoutExpired:
+        _kill_tree(proc)
+        out, _ = proc.communicate()
+        out = (out or "") + f"\n[sgl] timed out after {timeout}s"
+        code = 124
+    return subprocess.CompletedProcess(cmd, code, redact(out or "", secret_values(env)), None)
+
+
+def _kill_tree(proc: subprocess.Popen) -> None:
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.killpg(proc.pid, sig)
+        except (ProcessLookupError, PermissionError):
+            return
+        try:
+            proc.wait(timeout=2)
+            return
+        except subprocess.TimeoutExpired:
+            continue
 
 
 class Log:
     """Append-only JSON lines log, one file per run."""
 
     def __init__(self, root: Path, pipeline: str, quiet: bool = False):
-        root.mkdir(parents=True, exist_ok=True)
+        _private_dir(root)
         stamp = time.strftime("%Y%m%dT%H%M%S")
         self.path = root / f"{pipeline}-{stamp}-{os.getpid()}.jsonl"
         self.quiet = quiet
 
     def event(self, kind: str, **data: Any) -> None:
         rec = {"ts": round(time.time(), 3), "event": kind, **data}
-        with self.path.open("a") as f:
+        # owner-only (0600): logs hold command output, even if redacted
+        fd = os.open(self.path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+        with os.fdopen(fd, "a") as f:
             f.write(json.dumps(rec) + "\n")
 
     def say(self, msg: str) -> None:
         if not self.quiet:
             print(msg, flush=True)
+
+
+def _private_dir(path: Path) -> None:
+    """Create a directory readable by the owner only (0700), and its .sgl parent."""
+    path.mkdir(parents=True, exist_ok=True)
+    targets = [path] + ([path.parent] if path.parent.name == ".sgl" else [])
+    for p in targets:
+        try:
+            os.chmod(p, 0o700)
+        except OSError:
+            pass
 
 
 def _state_path(pl: Pipeline) -> Path:
@@ -129,7 +185,12 @@ def run(pl: Pipeline, gates_only: bool = False, resume: bool = False,
     state_file = _state_path(pl)
     passed: List[str] = []
     if resume and state_file.exists():
-        passed = json.loads(state_file.read_text()).get("passed", [])
+        try:
+            saved = json.loads(state_file.read_text()).get("passed", [])
+        except (ValueError, AttributeError):
+            saved = []
+        # only trust names that are really stages of THIS pipeline
+        passed = [n for n in saved if isinstance(n, str) and n in {s.name for s in pl.stages}]
 
     names = [s.name for s in pl.stages]
     if start_at and start_at not in names:
@@ -185,7 +246,7 @@ def run(pl: Pipeline, gates_only: bool = False, resume: bool = False,
                 log.say(f"        {line}")
         else:
             # every attempt failed: stop the line
-            state_file.parent.mkdir(parents=True, exist_ok=True)
+            _private_dir(state_file.parent)
             state_file.write_text(json.dumps({"passed": passed, "stopped_at": st.name}))
             result = {"ok": False, "stopped_at": st.name, "passed": passed,
                       "feedback": feedback, "log": str(log.path),

@@ -37,21 +37,33 @@ runs:
       run: |
         flags=""
         [ "$SGL_GATES_ONLY" = "true" ] && flags="--gates-only"
+        # result goes to the runner's temp dir, never the workspace, so a
+        # later step can't commit or upload it by accident
+        result="${RUNNER_TEMP}/sgl-result.json"
         set +e
-        sgl run "$SGL_PIPELINE" $flags --json > sgl-result.json
+        sgl run "$SGL_PIPELINE" $flags --json > "$result"
         code=$?
         set -e
-        python3 - <<'PY'
-        import json, os
-        r = json.load(open("sgl-result.json"))
+        SGL_RESULT="$result" python3 - <<'PY'
+        import json, os, re
+        try:
+            r = json.load(open(os.environ["SGL_RESULT"]))
+        except (OSError, ValueError):
+            r = {"ok": False, "stopped_at": "(sgl error)", "passed": [], "feedback": "sgl did not produce a result; see the step log"}
+        clean = lambda s: re.sub(r"[\r\n]", " ", str(s or ""))  # one line, so outputs can't be forged
         with open(os.environ["GITHUB_OUTPUT"], "a") as f:
             f.write(f"ok={'true' if r['ok'] else 'false'}\n")
-            f.write(f"stopped_at={r['stopped_at'] or ''}\n")
+            f.write(f"stopped_at={clean(r['stopped_at'])}\n")
+        # Gate output is already redacted by sgl. The fence is longer than any
+        # backtick run inside it, so output can't break out of the code block.
+        fb = r["feedback"][-6000:]
+        fence = "`" * max(3, max((len(m) for m in re.findall(r"`+", fb)), default=0) + 1)
         with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
             if r["ok"]:
-                f.write("### ✅ All stage gates passed\n\n" + ", ".join(r["passed"]) + "\n")
+                f.write("### ✅ All stage gates passed\n\n" + ", ".join(map(clean, r["passed"])) + "\n")
             else:
-                f.write(f"### 🛑 Stopped at `{r['stopped_at']}`\n\nPassed: {', '.join(r['passed']) or 'none'}\n\n")
-                f.write("```\n" + r["feedback"][-6000:] + "\n```\n")
+                f.write(f"### 🛑 Stopped at `{clean(r['stopped_at'])}`\n\n")
+                f.write(f"Passed: {', '.join(map(clean, r['passed'])) or 'none'}\n\n")
+                f.write(f"{fence}\n{fb}\n{fence}\n")
         PY
         exit $code

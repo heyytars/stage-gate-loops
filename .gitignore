@@ -10,3 +10,7 @@ sgl-result.json
 .DS_Store
 .env
 .env.*
+
+# PNGs are QA renders. Only the social card is kept: GitHub wants a PNG there.
+assets/*.png
+!assets/social-preview.png

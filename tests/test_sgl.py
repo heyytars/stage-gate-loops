@@ -7,6 +7,7 @@ import subprocess
 import sys
 import tempfile
 import textwrap
+import time
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
@@ -16,6 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from sgl import gates  # noqa: E402
+from sgl.redact import redact  # noqa: E402
 from sgl.runner import PipelineError, load, run  # noqa: E402
 
 PY = sys.executable
@@ -216,6 +218,125 @@ class GateTests(unittest.TestCase):
             self.assertEqual(g("cap", "--ledger", led, "--key", "k", "--max", "2", "--record")[0], 0)
         self.assertEqual(g("cap", "--ledger", led, "--key", "k", "--max", "2", "--record")[0], 1)
         self.assertEqual(g("cap", "--ledger", led, "--key", "other", "--max", "2")[0], 0)
+
+
+class RedactTests(unittest.TestCase):
+    def test_masks_env_secret_values(self):
+        with mock.patch.dict(os.environ, {"MY_API_TOKEN": "abcdefgh12345678"}):
+            out = redact("calling with abcdefgh12345678 now")
+        self.assertNotIn("abcdefgh12345678", out)
+        self.assertIn("[REDACTED]", out)
+
+    def test_ignores_short_values_and_normal_names(self):
+        with mock.patch.dict(os.environ, {"MY_API_TOKEN": "short", "HOME_": "/Users/x"}):
+            self.assertEqual(redact("short words here"), "short words here")
+
+    def test_masks_known_token_shapes_without_env(self):
+        for secret in ["ghp_" + "A" * 36, "sk-ant-" + "b" * 30, "AKIA" + "C" * 16,
+                       "sk_live_" + "d" * 20,
+                       "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.SflKxwRJSMeKKF2QT4fwpMeJf"]:
+            self.assertNotIn(secret, redact(f"token={secret} end"), secret)
+
+    def test_masks_credentials_in_headers_and_urls(self):
+        self.assertNotIn("hunter2xyz", redact("Authorization: Bearer hunter2xyz"))
+        self.assertIn("[REDACTED]", redact("Authorization: Bearer hunter2xyz"))
+        out = redact("https://user:hunter2pw@example.com/x")
+        self.assertNotIn("hunter2pw", out)
+        self.assertIn("user:[REDACTED]@example.com", out)
+
+    def test_masks_private_key_block(self):
+        blk = "-----BEGIN RSA PRIVATE KEY-----\nMIIEow\n-----END RSA PRIVATE KEY-----"
+        self.assertNotIn("MIIEow", redact(blk))
+
+
+class SecurityTests(unittest.TestCase):
+    """Regression tests for the audit findings."""
+
+    def setUp(self):
+        self._d = tempfile.TemporaryDirectory()
+        self.tmp = Path(self._d.name)
+
+    def tearDown(self):
+        self._d.cleanup()
+
+    def test_secret_in_gate_output_is_redacted_everywhere(self):
+        p = pipeline(self.tmp, """
+            stages:
+              - name: deploy
+                gates: ['echo "token is $MY_API_TOKEN"; exit 1']
+        """)
+        with mock.patch.dict(os.environ, {"MY_API_TOKEN": "ghp_" + "Z" * 36}):
+            r = run(load(str(p)), quiet=True)
+        secret = "ghp_" + "Z" * 36
+        self.assertNotIn(secret, r["feedback"])
+        self.assertIn("[REDACTED]", r["feedback"])
+        logged = Path(r["log"]).read_text()
+        self.assertNotIn(secret, logged)
+        self.assertNotIn(secret, (self.tmp / ".sgl" / "pipeline.state.json").read_text())
+
+    def test_log_file_and_dir_are_owner_only(self):
+        p = pipeline(self.tmp, "stages:\n  - name: a\n    gates: ['true']\n")
+        r = run(load(str(p)), quiet=True)
+        self.assertEqual(oct(Path(r["log"]).stat().st_mode)[-3:], "600")
+        self.assertEqual(oct(Path(r["log"]).parent.stat().st_mode)[-3:], "700")
+
+    def test_pipeline_name_cannot_escape_workdir(self):
+        for name in ["../../escaped", "..", "/tmp/abs", "a/b", ".hidden", "", "x" * 101]:
+            body = f"name: '{name}'\nstages:\n  - name: a\n    gates: ['true']\n"
+            with self.assertRaises(PipelineError, msg=name):
+                load(str(pipeline(self.tmp, body)))
+        # no file may have been written outside the workdir
+        self.assertFalse((self.tmp.parent / "escaped.state.json").exists())
+
+    def test_stage_name_cannot_contain_newlines(self):
+        with self.assertRaises(PipelineError):
+            load(str(pipeline(self.tmp, 'stages:\n  - {name: "a\\nb", gates: ["true"]}\n')))
+        with self.assertRaises(PipelineError):
+            load(str(pipeline(self.tmp, "stages:\n  - {name: 7, gates: ['true']}\n")))
+
+    def test_timeout_kills_the_whole_process_tree(self):
+        marker = self.tmp / "child-alive"
+        p = pipeline(self.tmp, f"""
+            stages:
+              - name: a
+                gates:
+                  - name: slow
+                    run: "sh -c 'sleep 20; touch {marker}' & wait"
+                    timeout: 1
+        """)
+        r = run(load(str(p)), quiet=True)
+        self.assertFalse(r["ok"])
+        time.sleep(2.5)
+        self.assertFalse(marker.exists(), "child survived the timeout: process tree not killed")
+
+    def test_cap_is_atomic_under_concurrency(self):
+        led = str(self.tmp / "ledger.tsv")
+        cmd = [PY, "-m", "sgl", "gate", "cap", "--ledger", led, "--key", "k",
+               "--max", "3", "--record"]
+        env = {**os.environ, "PYTHONPATH": str(ROOT / "src")}
+        procs = [subprocess.Popen(cmd, env=env, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                 for _ in range(16)]
+        passed = sum(1 for pr in procs if pr.wait() == 0)
+        self.assertEqual(passed, 3, "cap allowed more than the limit")
+        self.assertEqual(len(Path(led).read_text().splitlines()), 3)
+
+    def test_cap_rejects_keys_that_break_the_ledger(self):
+        led = str(self.tmp / "l.tsv")
+        self.assertEqual(g("cap", "--ledger", led, "--key", "a\tb", "--max", "5")[0], 1)
+        self.assertEqual(g("cap", "--ledger", led, "--key", "a\nb", "--max", "5")[0], 1)
+
+    def test_preflight_rejects_non_http_schemes(self):
+        for url in ["file:///etc/passwd", "gopher://x/", "ftp://x/"]:
+            code, out = g("preflight", "--url", url)
+            self.assertEqual(code, 1, url)
+            self.assertIn("only http(s)", out)
+
+    def test_resume_ignores_stage_names_that_are_not_in_the_pipeline(self):
+        p = pipeline(self.tmp, "stages:\n  - name: a\n    gates: ['true']\n")
+        state = self.tmp / ".sgl" / "pipeline.state.json"
+        state.parent.mkdir(parents=True, exist_ok=True)
+        state.write_text(json.dumps({"passed": ["a", "not-a-stage", 42]}) + "{trailing junk")
+        self.assertTrue(run(load(str(p)), resume=True, quiet=True)["ok"])
 
 
 class HookTests(unittest.TestCase):
