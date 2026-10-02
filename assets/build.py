@@ -103,11 +103,9 @@ def stage_card(x, y, bw, bh, num, name, note, p, colour=None, verdict=None):
 
 
 # --------------------------------------------------------------------------- hero
-def hero(p) -> str:
-    W, H = 1280, 420
-    s = header(W, H, p, "Stage gate loops",
-               "Four stages, each ending in a gate that must pass before the next stage runs")
-    s += gate_mark(44, 40, 2.0, p)
+def hero_body(p) -> str:
+    """The hero artwork without its frame, so the social card can reuse it."""
+    s = gate_mark(44, 40, 2.0, p)
     title = "Stage gate loops"
     tag = "Check every step. Stop at the first failure."
     fit(title, 40, 1000, "hero title")
@@ -146,7 +144,23 @@ def hero(p) -> str:
            12, p["fail"])
     s += t(60, 378, "Each gate is a command. Exit 0 = pass, anything else = fail. No model decides.",
            12, p["muted"])
-    return s + "</svg>\n"
+    return s
+
+
+def hero(p) -> str:
+    W, H = 1280, 420
+    s = header(W, H, p, "Stage gate loops",
+               "Four stages, each ending in a gate that must pass before the next stage runs")
+    return s + hero_body(p) + "</svg>\n"
+
+
+def social(p) -> str:
+    """1280x640 card for link previews. The background must fill the whole
+    canvas: a preview that is cropped to 640 with a white band at the bottom
+    looks broken in every chat client."""
+    W, H = 1280, 640
+    s = header(W, H, p, "Stage gate loops", "Check every step. Stop at the first failure.")
+    return s + f'<g transform="translate(0,{(H - 420) / 2:.0f})">' + hero_body(p) + "</g></svg>\n"
 
 
 # --------------------------------------------------------------------------- flow
@@ -363,7 +377,8 @@ def logo(p) -> str:
 
 def main() -> int:
     assets = [("hero", hero), ("how-it-works", flow), ("two-ways", compare),
-              ("benchmark", benchmark), ("terminal", terminal), ("logo", logo)]
+              ("benchmark", benchmark), ("terminal", terminal), ("logo", logo),
+              ("social", social)]
     for name, fn in assets:
         for theme, pal in (("light", LIGHT), ("dark", DARK)):
             path = OUT / f"{name}-{theme}.svg"
@@ -375,7 +390,7 @@ def main() -> int:
         png = OUT / "social-preview.png"
         subprocess.run([chrome, "--headless=new", "--disable-gpu", "--hide-scrollbars",
                         "--force-device-scale-factor=1", "--window-size=1280,640",
-                        f"--screenshot={png}", f"file://{OUT / 'hero-light.svg'}"],
+                        f"--screenshot={png}", f"file://{OUT / 'social-light.svg'}"],
                        check=True, capture_output=True)
         print(f"wrote assets/{png.name}  ({png.stat().st_size} bytes)")
     else:
