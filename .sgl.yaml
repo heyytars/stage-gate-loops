@@ -13,9 +13,11 @@ stages:
       - name: no-secrets-in-history
         run: gitleaks git . --no-banner --redact
       - name: static-analysis
-        # -ll: fail on medium or high severity. Low findings (subprocess use)
-        # are expected in a tool whose job is running commands.
-        run: bandit -r src -ll -q
+        # --severity-level medium: fail on medium or high. Low findings are
+        # expected in a tool whose whole job is running commands, and the two
+        # real findings (B602 shell, B310 urlopen) are suppressed in source with
+        # a written reason, not hidden by the threshold.
+        run: bandit -r src --severity-level medium -q
 
   - name: code
     gates:

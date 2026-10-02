@@ -200,13 +200,17 @@ def preflight(argv: List[str]) -> int:
     a = ap.parse_args(argv)
     bad = [f"command not found: {c}" for c in a.cmd if not shutil.which(c)]
     bad += [f"env var not set: {e}" for e in a.env if not os.environ.get(e)]
+    # urllib can be handed file:// and other schemes, so each URL's scheme is
+    # checked against an allowlist right here and everything else is refused.
+    # bandit's B310 is suppressed below; keep that comment bare (adding prose
+    # after the id makes bandit read the words as more test ids and warn).
     for u in a.url:
         if urllib.parse.urlsplit(u).scheme not in ("http", "https"):
             bad.append(f"{u}: only http(s) URLs are allowed")
             continue
         try:
             req = urllib.request.Request(u, method="HEAD", headers={"User-Agent": "sgl-preflight"})
-            with urllib.request.urlopen(req, timeout=a.timeout) as r:  # nosec B310: scheme checked above
+            with urllib.request.urlopen(req, timeout=a.timeout) as r:  # nosec B310
                 if r.status >= 500:
                     bad.append(f"{u}: HTTP {r.status}")
         except urllib.error.HTTPError as e:

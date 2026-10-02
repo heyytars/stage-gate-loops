@@ -110,10 +110,14 @@ def _sh(cmd: str, cwd: Path, env: Dict[str, str], timeout: int) -> subprocess.Co
     # tree, not just the shell (otherwise `sleep 600 &` outlives the gate).
     # All output is redacted HERE, the single choke point, before it can reach
     # the console, the log, $SGL_FEEDBACK or a CI job summary.
-    proc = subprocess.Popen(  # nosec B602 - shell is the product: a gate IS a shell command,
-        # exactly like a CI `run:` step or a Makefile recipe. sgl never builds a
-        # command from untrusted input; commands come from the pipeline file, and
-        # values reach the command as environment variables, not as interpolated text.
+    #
+    # bandit B602 is suppressed below, not ignored: shell is the product. A gate
+    # IS a shell command, exactly like a CI `run:` step or a Makefile recipe.
+    # sgl never builds a command from untrusted input; commands come from the
+    # pipeline file, and values reach the command as environment variables, never
+    # as interpolated text. Keep the nosec on one line and add no prose to it:
+    # bandit parses the comment text after the id as more test ids and warns.
+    proc = subprocess.Popen(  # nosec B602
         cmd, shell=True, cwd=str(cwd), env=env, start_new_session=True,
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
         text=True, errors="replace")
