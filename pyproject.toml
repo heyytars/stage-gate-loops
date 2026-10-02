@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "stage-gate-loops"
+version = "0.1.0"
+description = "Deterministic gates between agent stages. Stop the line at the first failure."
+readme = "README.md"
+license = { text = "MIT" }
+authors = [{ name = "Gaurav Singh" }]
+requires-python = ">=3.9"
+dependencies = ["pyyaml>=5.4"]
+keywords = ["agents", "llm", "loop-engineering", "quality-gates", "claude-code", "ci"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Topic :: Software Development :: Quality Assurance",
+]
+
+[project.urls]
+Homepage = "https://github.com/heyytars/stage-gate-loops"
+Essay = "https://gauravsingh.net/posts/stage-gate-loops/"
+
+[project.scripts]
+sgl = "sgl.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

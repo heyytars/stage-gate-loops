@@ -1,0 +1,38 @@
+name: cron-report
+# A scheduled job: fetch data -> write a report -> deliver it.
+# Two rules that matter for anything on a cron:
+#   1. Preflight first. If the environment is broken, stop before doing work.
+#   2. Cap side effects. The cap gate sits right before delivery, so a loop
+#      that misfires 50 times still delivers at most N times a day.
+# Schedule it with plain cron:  0 7 * * *  cd /path/to/cron-report && sgl run pipeline.yaml -q
+
+stages:
+  - name: preflight
+    gates:
+      - name: environment
+        run: sgl gate preflight --cmd python3
+
+  - name: fetch
+    run: python3 job.py fetch
+    gates:
+      - name: data-schema
+        run: sgl gate schema out/data.json --schema data.schema.json
+
+  - name: report
+    run: python3 job.py report
+    gates:
+      - name: exists
+        run: sgl gate exists out/report.md --min-bytes 50
+      - name: no-broken-values
+        run: sgl gate no-pattern out/report.md -p "\bnan\b" -p "\bNone\b" -p "\bundefined\b"
+
+  - name: budget          # gate-only stage: runs BEFORE the side effect
+    gates:
+      - name: daily-cap
+        run: sgl gate cap --ledger out/deliveries.tsv --key daily-report --max 3 --record
+
+  - name: deliver
+    run: python3 job.py deliver
+    gates:
+      - name: delivered
+        run: sgl gate exists out/outbox/report.md --min-bytes 50

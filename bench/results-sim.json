@@ -1,0 +1,23 @@
+{
+  "params": {
+    "mode": "sim",
+    "costs": "2000,4000,4000,2000",
+    "fail": "0.05,0.4,0.2,0.05",
+    "attempts": 3,
+    "trials": 20000,
+    "seed": 7,
+    "json": "bench/results-sim.json"
+  },
+  "results": {
+    "end-of-run check": {
+      "mean_tokens": 22761,
+      "p90_tokens": 36000,
+      "success_rate": 0.8116
+    },
+    "stage gates": {
+      "mean_tokens": 14963,
+      "p90_tokens": 20000,
+      "success_rate": 0.93
+    }
+  }
+}

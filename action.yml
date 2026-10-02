@@ -1,0 +1,57 @@
+name: "Stage gate loops"
+description: "Run an sgl pipeline. The job fails at the first failed gate, and the breakpoint shows in the job summary."
+branding:
+  icon: "git-commit"
+  color: "green"
+inputs:
+  pipeline:
+    description: "Path to the pipeline YAML"
+    required: true
+  gates-only:
+    description: "Only check gates, skip stage commands (use this to gate an agent's PR)"
+    required: false
+    default: "false"
+  version:
+    description: "sgl git ref to install"
+    required: false
+    default: "main"
+outputs:
+  ok:
+    description: "true if every gate passed"
+    value: ${{ steps.run.outputs.ok }}
+  stopped-at:
+    description: "Name of the stage that stopped the line"
+    value: ${{ steps.run.outputs.stopped_at }}
+runs:
+  using: "composite"
+  steps:
+    - shell: bash
+      env:
+        SGL_VERSION: ${{ inputs.version }}
+      run: pip install --quiet "git+https://github.com/heyytars/stage-gate-loops@${SGL_VERSION}"
+    - id: run
+      shell: bash
+      env:
+        SGL_PIPELINE: ${{ inputs.pipeline }}
+        SGL_GATES_ONLY: ${{ inputs.gates-only }}
+      run: |
+        flags=""
+        [ "$SGL_GATES_ONLY" = "true" ] && flags="--gates-only"
+        set +e
+        sgl run "$SGL_PIPELINE" $flags --json > sgl-result.json
+        code=$?
+        set -e
+        python3 - <<'PY'
+        import json, os
+        r = json.load(open("sgl-result.json"))
+        with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+            f.write(f"ok={'true' if r['ok'] else 'false'}\n")
+            f.write(f"stopped_at={r['stopped_at'] or ''}\n")
+        with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+            if r["ok"]:
+                f.write("### ✅ All stage gates passed\n\n" + ", ".join(r["passed"]) + "\n")
+            else:
+                f.write(f"### 🛑 Stopped at `{r['stopped_at']}`\n\nPassed: {', '.join(r['passed']) or 'none'}\n\n")
+                f.write("```\n" + r["feedback"][-6000:] + "\n```\n")
+        PY
+        exit $code

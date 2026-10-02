@@ -1,0 +1,38 @@
+name: blog-publish
+# A three-stage content loop: research -> draft -> publish.
+# The "agent" is agent.py. By default it is an offline stub so the demo runs
+# anywhere. Set AGENT_CMD to drive a real model, e.g. AGENT_CMD="claude -p".
+
+stages:
+  - name: preflight
+    gates:
+      - name: tools
+        run: sgl gate preflight --cmd python3
+
+  - name: research
+    run: python3 agent.py research
+    retries: 1
+    gates:
+      - name: brief-schema
+        run: sgl gate schema out/brief.json --schema brief.schema.json
+
+  - name: draft
+    run: python3 agent.py draft
+    retries: 2            # on fail, the gate output goes back to the agent as SGL_FEEDBACK
+    gates:
+      - name: exists
+        run: sgl gate exists out/post.md --min-bytes 200
+      - name: frontmatter
+        run: sgl gate frontmatter out/post.md --require title,description,date
+      - name: no-em-dash
+        run: sgl gate no-pattern out/post.md -p "\u2014"
+      - name: no-filler
+        run: sgl gate no-pattern out/post.md -i -p "\bdelve\b" -p "game[- ]changer" -p "in today's fast-paced"
+      - name: length
+        run: sgl gate words out/post.md --min 80 --max 1500
+
+  - name: publish
+    run: python3 agent.py publish
+    gates:
+      - name: published
+        run: sgl gate exists out/published/post.md --min-bytes 200

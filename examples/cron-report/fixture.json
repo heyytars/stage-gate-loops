@@ -1,0 +1,8 @@
+{
+  "date": "2026-10-02",
+  "metrics": [
+    {"name": "signups", "value": 42},
+    {"name": "active_users", "value": 318},
+    {"name": "churned", "value": 3}
+  ]
+}

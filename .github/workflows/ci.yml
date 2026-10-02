@@ -1,0 +1,52 @@
+name: ci
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python: ["3.9", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+      - run: pip install -e .
+      - name: unit tests
+        run: python -m unittest discover -s tests -v
+      - name: examples run end to end
+        run: |
+          for ex in blog-publish code-pr cron-report; do
+            (cd examples/$ex && sgl run pipeline.yaml)
+          done
+      - name: cron-report stops on bad upstream data
+        run: |
+          cd examples/cron-report && rm -rf out .sgl
+          if BREAK=1 sgl run pipeline.yaml; then echo "expected the schema gate to stop the line"; exit 1; fi
+      - name: benchmark sim is reproducible
+        run: python bench/bench.py sim
+
+  # The repo dogfoods itself: its own CI is an sgl pipeline.
+  self-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: install gitleaks
+        run: |
+          curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz | tar -xz gitleaks
+          sudo mv gitleaks /usr/local/bin/
+      - uses: ./
+        with:
+          pipeline: .sgl.yaml
+          version: ${{ github.sha }}

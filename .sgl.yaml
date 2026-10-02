@@ -1,0 +1,26 @@
+name: repo
+# This repo's own gates. CI runs them through the GitHub Action, and they
+# work as a Claude Code Stop hook while developing: sgl hook claude-code .sgl.yaml
+
+stages:
+  - name: preflight
+    gates:
+      - name: tools
+        run: sgl gate preflight --cmd python3 --cmd git
+
+  - name: secrets
+    gates:
+      - name: gitleaks
+        run: gitleaks detect --source . --no-banner --redact
+
+  - name: code
+    gates:
+      - name: compiles
+        run: python3 -m compileall -q src bench
+      - name: tests
+        run: python3 -m unittest discover -s tests -q
+
+  - name: docs
+    gates:
+      - name: no-em-dash-in-docs
+        run: sgl gate no-pattern README.md adapters/claude-code/README.md adapters/github-action/README.md -p "\u2014"

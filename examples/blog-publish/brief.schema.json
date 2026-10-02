@@ -1,0 +1,21 @@
+{
+  "type": "object",
+  "required": ["topic", "audience", "angle", "sources"],
+  "properties": {
+    "topic": {"type": "string", "minLength": 5},
+    "audience": {"type": "string", "minLength": 3},
+    "angle": {"type": "string", "minLength": 10},
+    "sources": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "required": ["title", "url"],
+        "properties": {
+          "title": {"type": "string", "minLength": 3},
+          "url": {"type": "string", "pattern": "^https://"}
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,12 @@
+.venv/
+__pycache__/
+*.egg-info/
+build/
+dist/
+.sgl/
+examples/*/out/
+examples/code-pr/src/
+sgl-result.json
+.DS_Store
+.env
+.env.*

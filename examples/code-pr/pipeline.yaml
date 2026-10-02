@@ -1,0 +1,25 @@
+name: code-pr
+# An agent implements a function. The gates are the same ones CI would run:
+# it must compile, and the tests must pass. A failing test goes back to the
+# agent as feedback; it fixes the code and only that stage reruns.
+# Real mode: AGENT_CMD="claude -p" (or any CLI that takes a prompt, prints code).
+
+stages:
+  - name: preflight
+    gates:
+      - name: tools
+        run: sgl gate preflight --cmd python3
+
+  - name: implement
+    run: python3 agent.py
+    retries: 2
+    gates:
+      - name: compiles
+        run: python3 -m py_compile src/slug.py
+      - name: tests
+        run: python3 -m unittest discover -s tests -q
+
+  - name: review-ready
+    gates:
+      - name: no-debug-left
+        run: sgl gate no-pattern src/slug.py -p "\bprint\(" -p "breakpoint\(" -p "TODO"

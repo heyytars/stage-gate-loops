@@ -1,0 +1,11 @@
+{
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          { "type": "command", "command": "sgl hook claude-code .sgl.yaml" }
+        ]
+      }
+    ]
+  }
+}
