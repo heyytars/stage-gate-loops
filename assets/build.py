@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""Builds the README/SVG assets in both light and dark themes.
+"""Builds every README graphic, in light and dark, from one palette.
+
+Design rules for these pictures:
+  * icons and colour carry the meaning; words are labels, one or two at most
+  * green = passed, red = failed and retried; other colours only tell stages apart
+  * every number shown is real: the terminal is a real run of examples/blog-publish,
+    the chart is bench/bench.py sim with its default arguments
 
 Why a script: SVG text does not reflow. Every label is measured against its
-container (monospace, 0.60em per char) and the script exits loudly if a string
-would overflow. Edit the copy, re-run, and the layout stays correct.
+box (fit() fails the build on overflow), and CI re-runs this file and fails if
+the committed pictures differ from what it produces.
 
-  python3 assets/build.py
-
+Usage: python3 assets/build.py
 Outputs: assets/*-light.svg, assets/*-dark.svg, assets/social-preview.png
 """
 
@@ -18,22 +23,47 @@ from pathlib import Path
 
 OUT = Path(__file__).resolve().parent
 MONO = "ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace"
-SANS = "-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif"
-# the em dash is drawn as text, so it must never be written literally in this file
+SANS = "-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif"
+# the em dash appears in the terminal picture, so it is written as an entity:
+# this repo's docs gate bans the literal character
 EM = "&#8212;"
 
 LIGHT = dict(
     bg="#ffffff", panel="#f6f8fa", ink="#1f2328", muted="#59636e", line="#d1d9e0",
-    pass_="#1a7f37", fail="#cf222e", brand="#1a7f37", zebra="#eff2f5",
+    dot="#e3e8ed", shadow="0.08",
+    pass_="#1a7f37", fail="#cf222e",
+    blue="#0969da", purple="#8250df", orange="#bc4c00",
 )
 DARK = dict(
-    bg="#0d1117", panel="#161b22", ink="#e6edf3", muted="#9198a1", line="#30363d",
-    pass_="#3fb950", fail="#f85149", brand="#3fb950", zebra="#1c2128",
+    bg="#0d1117", panel="#151b23", ink="#f0f6fc", muted="#9198a1", line="#3d444d",
+    dot="#21262d", shadow="0.45",
+    pass_="#3fb950", fail="#f85149",
+    blue="#4493f8", purple="#ab7df8", orange="#f0883e",
 )
+# the terminal is dark in both themes, like a real terminal
+TERM = dict(bg="#0d1117", bar="#161b22", line="#30363d", ink="#e6edf3", muted="#7d8590",
+            pass_="#3fb950", fail="#f85149", accent="#ab7df8")
+
+ICONS = {  # 24x24 stroke icons, drawn for this repo
+    "search": '<circle cx="11" cy="11" r="6.5"/><path d="M20 20l-4.3-4.3"/>',
+    "pen": '<path d="M13 20h8"/><path d="M16.5 3.6a2.1 2.1 0 0 1 3 3L7.5 18.6 3.5 19.5l.9-4z"/>',
+    "send": '<path d="M21 3L10.5 13.5"/><path d="M21 3l-6.5 18-4-7.5L3 9.5z"/>',
+    "flag": '<path d="M5 21V4"/><path d="M5 4h12l-2.5 4.5L17 13H5"/>',
+    "check": '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+    "x": '<path d="M7 7l10 10M17 7L7 17"/>',
+    "retry": '<path d="M4 12a8 8 0 1 0 2.4-5.7"/><path d="M4 4v5h5"/>',
+    "bot": '<rect x="4" y="8" width="16" height="12" rx="3.5"/><path d="M12 8V4.5"/>'
+           '<circle cx="12" cy="3.5" r="1.2"/><path d="M9.5 13.5v1.5M14.5 13.5v1.5"/>',
+    "terminal": '<rect x="3" y="4" width="18" height="16" rx="3.5"/><path d="M7.5 10l3 2.5-3 2.5M13 15.5h4"/>',
+    "arrow": '<path d="M5 12h14M13 6l6 6-6 6"/>',
+    "coin": '<ellipse cx="12" cy="7" rx="7" ry="3"/><path d="M5 7v5c0 1.7 3.1 3 7 3s7-1.3 7-3V7"/>'
+            '<path d="M5 12v5c0 1.7 3.1 3 7 3s7-1.3 7-3v-5"/>',
+}
 
 
+# --------------------------------------------------------------------------- primitives
 def w(text: str, size: float) -> float:
-    """Approximate rendered width of monospace text."""
+    """Conservative rendered width (monospace is 0.60em; sans is narrower)."""
     return len(text) * size * 0.60
 
 
@@ -42,336 +72,315 @@ def fit(text: str, size: float, box: float, where: str) -> None:
         raise SystemExit(f"overflow in {where}: {text!r} needs {w(text, size):.0f}px, box is {box:.0f}px")
 
 
-def t(x, y, s, size=13, fill=None, anchor="start", family=MONO, weight="400", opacity=None):
+def t(x, y, s, size=13, fill="#000", anchor="start", family=SANS, weight="400", spacing=None):
     a = f' text-anchor="{anchor}"' if anchor != "start" else ""
-    o = f' opacity="{opacity}"' if opacity else ""
-    fam = f' font-family="{family}"' if family else ""
-    return (f'<text x="{x}" y="{y}" font-size="{size}"{fam} fill="{fill}"'
-            f' font-weight="{weight}"{a}{o}>{s}</text>')
+    ls = f' letter-spacing="{spacing}"' if spacing else ""
+    # white-space:pre keeps leading spaces (SVG collapses them otherwise)
+    return (f'<text x="{x}" y="{y}" font-size="{size}" font-family="{family}" fill="{fill}"'
+            f' font-weight="{weight}"{a}{ls} xml:space="preserve" style="white-space:pre">{s}</text>')
 
 
-def rect(x, y, wd, h, c, r=6, sw=1.5, dash=None, fill="none"):
-    d = f' stroke-dasharray="{dash}"' if dash else ""
-    return (f'<rect x="{x}" y="{y}" width="{wd}" height="{h}" rx="{r}" fill="{fill}" '
-            f'stroke="{c}" stroke-width="{sw}"{d}/>')
+def icon(name, cx, cy, size, colour, sw=2.0):
+    k = size / 24
+    return (f'<g transform="translate({cx - size / 2:.1f},{cy - size / 2:.1f}) scale({k:.4f})" fill="none" '
+            f'stroke="{colour}" stroke-width="{sw}" stroke-linecap="round" stroke-linejoin="round">'
+            f'{ICONS[name]}</g>')
 
 
-def arrow(x1, y1, x2, y2, c, marker="a"):
-    return f'<path d="M{x1} {y1} L{x2} {y2}" stroke="{c}" stroke-width="1.6" marker-end="url(#{marker})"/>'
-
-
-def header(wd, h, p, title, desc):
-    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{wd}" height="{h}" viewBox="0 0 {wd} {h}"
+def frame(W, H, p, title, desc, dots=True):
+    """Canvas: rounded card, faint dot grid, soft shadow filter, arrow markers."""
+    grid = (f'<rect x="1" y="1" width="{W - 2}" height="{H - 2}" rx="20" fill="url(#dots)"/>'
+            if dots else "")
+    return f'''<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}"
   role="img" aria-labelledby="t" aria-describedby="d">
   <title id="t">{title}</title><desc id="d">{desc}</desc>
   <defs>
-    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-      <path d="M0 0 L10 5 L0 10 z" fill="{p['muted']}"/>
-    </marker>
-    <marker id="af" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-      <path d="M0 0 L10 5 L0 10 z" fill="{p['fail']}"/>
-    </marker>
+    <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.1" fill="{p['dot']}"/>
+    </pattern>
+    <filter id="sh" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="6" stdDeviation="9" flood-color="#000" flood-opacity="{p['shadow']}"/>
+    </filter>
+    <marker id="am" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0L10 5L0 10z" fill="{p['muted']}"/></marker>
+    <marker id="ag" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0L10 5L0 10z" fill="{p['pass_']}"/></marker>
+    <marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0L10 5L0 10z" fill="{p['fail']}"/></marker>
   </defs>
-  <rect width="{wd}" height="{h}" rx="12" fill="{p['bg']}"/>
-  <rect x="0.75" y="0.75" width="{wd - 1.5}" height="{h - 1.5}" rx="11" fill="none"
-        stroke="{p['line']}" stroke-width="1.5"/>
+  <rect x="0.75" y="0.75" width="{W - 1.5}" height="{H - 1.5}" rx="20" fill="{p['bg']}" stroke="{p['line']}" stroke-width="1.5"/>
+  {grid}
 '''
 
 
-def gate_mark(x, y, s, p, colour=None):
-    """The logo mark: two posts and a bar between them. A gate you pass through."""
-    c = colour or p["brand"]
-    return f'''<g transform="translate({x},{y}) scale({s})" stroke="{c}" stroke-width="2.2"
-     fill="none" stroke-linecap="round">
-  <path d="M2 2 v16 M22 2 v16"/>
-  <path d="M2 10 h20" stroke-width="2.6"/>
-  <circle cx="12" cy="10" r="3.2" fill="{c}" stroke="none"/>
-</g>'''
-
-
-def stage_card(x, y, bw, bh, num, name, note, p, colour=None, verdict=None):
-    """A stage box: number, name, one-line role, optional PASS/FAIL tag."""
-    col = colour or p["line"]
-    s = rect(x, y, bw, bh, col, r=9, sw=1.6 if colour else 1.4)
-    s += t(x + 14, y + 23, f"STAGE {num}", 10, p["muted"], weight="700")
-    fit(name, 15, bw - 28, f"stage name {name}")
-    s += t(x + 14, y + 45, name, 15, p["ink"], weight="700", family=SANS)
-    s += t(x + 14, y + 63, note, 10, p["muted"])
-    if verdict:
-        s += t(x + bw - 14, y + 23, verdict, 10, col, anchor="end", weight="700")
+def tile(cx, cy, size, name, colour, p, label=None, badge=False, solid=False):
+    """A stage: a soft tinted square with one icon and a one-word label under it."""
+    h = size / 2
+    r = round(size * 0.26)
+    s = f'<rect x="{cx - h}" y="{cy - h}" width="{size}" height="{size}" rx="{r}" fill="{p["bg"]}" filter="url(#sh)"/>'
+    s += (f'<rect x="{cx - h}" y="{cy - h}" width="{size}" height="{size}" rx="{r}" '
+          f'fill="{colour}" fill-opacity="{0.16 if solid else 0.09}" stroke="{colour}" '
+          f'stroke-opacity="{0.9 if solid else 0.35}" stroke-width="{2 if solid else 1.5}"/>')
+    s += icon(name, cx, cy, size * 0.42, colour)
+    if label:
+        fit(label, 15, size + 60, f"tile label {label}")
+        s += t(cx, cy + h + 30, label, 15, p["ink"], anchor="middle", weight="600")
+    if badge:
+        bx, by = cx + h - 4, cy - h + 4
+        s += f'<circle cx="{bx}" cy="{by}" r="12" fill="{p["fail"]}" stroke="{p["bg"]}" stroke-width="2.5"/>'
+        s += icon("retry", bx, by, 13, "#ffffff", sw=2.8)
     return s
 
 
+def gate(cx, cy, r, ok, p):
+    """A gate: a round checkpoint. Green tick passes, red cross stops the line."""
+    c = p["pass_"] if ok else p["fail"]
+    s = f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="{p["bg"]}" filter="url(#sh)"/>'
+    s += f'<circle cx="{cx}" cy="{cy}" r="{r}" fill="{c}" fill-opacity="0.12" stroke="{c}" stroke-width="2.2"/>'
+    s += icon("check" if ok else "x", cx, cy, r * 1.05, c, sw=3.0)
+    return s
+
+
+def pill(cx, cy, text, colour, p, size=13, filled=False):
+    fit(text, size, 400, f"pill {text}")
+    pw = w(text, size) + 26
+    ph = size + 14
+    s = (f'<rect x="{cx - pw / 2:.1f}" y="{cy - ph / 2:.1f}" width="{pw:.1f}" height="{ph}" rx="{ph / 2}" '
+         f'fill="{colour if filled else p["bg"]}" stroke="{colour}" stroke-width="1.5"/>')
+    s += t(cx, cy + size * 0.36, text, size, "#ffffff" if filled else colour,
+           anchor="middle", weight="700", family=MONO)
+    return s
+
+
+def track(x1, x2, y, p):
+    return (f'<path d="M{x1} {y}H{x2}" stroke="{p["muted"]}" stroke-opacity="0.55" '
+            f'stroke-width="2.2" stroke-linecap="round" marker-end="url(#am)"/>')
+
+
+def arc(x1, y1, x2, y2, lift, colour, marker="ar", dash="7 6"):
+    """A dashed return arrow that hops over the row, from a gate back to a stage."""
+    top = min(y1, y2) - lift
+    return (f'<path d="M{x1} {y1} C{x1} {top}, {x2} {top}, {x2} {y2 - 8}" fill="none" stroke="{colour}" '
+            f'stroke-width="2.4" stroke-dasharray="{dash}" stroke-linecap="round" marker-end="url(#{marker})"/>')
+
+
+def mark(x, y, s, colour):
+    """The logo: two posts and a bar with a knot. A gate you pass through."""
+    return (f'<g transform="translate({x},{y}) scale({s})" stroke="{colour}" stroke-width="2.4" '
+            f'fill="none" stroke-linecap="round"><path d="M2 2v18M24 2v18"/>'
+            f'<path d="M2 11h22" stroke-width="2.8"/><circle cx="13" cy="11" r="3.6" fill="{colour}" stroke="none"/></g>')
+
+
 # --------------------------------------------------------------------------- hero
-def hero_body(p) -> str:
-    """The hero artwork without its frame, so the social card can reuse it."""
-    s = gate_mark(44, 40, 2.0, p)
-    title = "Stage gate loops"
-    tag = "Check every step. Stop at the first failure."
-    fit(title, 40, 1000, "hero title")
-    s += t(100, 78, title, 40, p["ink"], weight="700", family=SANS)
-    s += t(100, 108, tag, 15, p["muted"], family=SANS)
+STAGES = [("search", "research", "blue"), ("pen", "draft", "purple"),
+          ("send", "publish", "orange"), ("flag", "done", "pass_")]
 
-    s += rect(40, 148, 1200, 196, p["line"], r=10, fill=p["panel"])
-    # slot must hold: box 250 + gap to diamond 9 + diamond 40 + gap to next box 4 = 296 min
-    bx, bw, gap, gy, bh = 60, 250, 60, 186, 88
-    gatex = bx + bw + 9
-    for i in range(4):
-        x = bx + i * (bw + gap)
-        if i < 3:
-            s += stage_card(x, gy, bw, bh, i + 1, ["research", "draft", "publish"][i],
-                            "the agent does the work", p)
-            gname = ["brief-schema", "frontmatter", "published"][i]
-            cx = gatex + i * (bw + gap) + 13
-            s += f'<path d="M{cx + 3} {gy + bh / 2} l10 -15 h20 l10 15 l-10 15 h-20 z" ' \
-                 f'fill="{p["bg"]}" stroke="{p["muted"]}" stroke-width="1.4"/>'
-            s += t(cx + 13, gy + bh / 2 + 38, "gate", 10, p["muted"], anchor="middle")
-            fit(gname, 10, 90, f"gate {gname}")
-            s += t(cx + 13, gy + bh / 2 + 52, gname, 10, p["pass_"], anchor="middle")
-            if i < 2:
-                s += arrow(x + bw + 4, gy + bh / 2, gatex + i * (bw + gap) - 3, gy + bh / 2, p["muted"])
-                s += arrow(gatex + i * (bw + gap) + 29, gy + bh / 2,
-                           bx + (i + 1) * (bw + gap) - 4, gy + bh / 2, p["muted"])
-        else:
-            s += rect(x, gy, bw, bh, p["brand"], r=9, sw=1.8)
-            s += t(x + 14, gy + 23, "STAGE 4", 10, p["muted"], weight="700")
-            s += t(x + 14, gy + 45, "done", 15, p["ink"], weight="700", family=SANS)
-            s += t(x + 14, gy + 63, "\u2713 every gate passed", 11, p["brand"])
 
-    fx = bx + 1 * (bw + gap) + bw + 13 - 37
-    s += f'<path d="M{fx} {gy + bh} v18" stroke="{p["fail"]}" stroke-width="1.6" marker-end="url(#af)"/>'
-    s += t(fx + 12, gy + bh + 30, "FAIL: stop the line, hand the failure back, rerun only this stage",
-           12, p["fail"])
-    s += t(60, 378, "Each gate is a command. Exit 0 = pass, anything else = fail. No model decides.",
-           12, p["muted"])
+def hero_body(p, title_size=34, top=0) -> str:
+    s = mark(62, 56 + top, 1.7, p["pass_"])
+    s += t(118, 88 + top, "stage gate loops", title_size, p["ink"], weight="800", spacing="-0.5")
+    s += t(118, 118 + top, "Check every step. Stop at the first failure.", 17, p["muted"])
+
+    cy, T = 268 + top, 104
+    xs = [210, 500, 790, 1080]
+    gates = [(355, True, "schema"), (645, False, "no em dash"), (935, True, "published")]
+    for i in range(3):
+        s += track(xs[i] + T / 2 + 10, xs[i + 1] - T / 2 - 14, cy, p)
+    for (gx, ok, name) in gates:
+        s += gate(gx, cy, 22, ok, p)
+        fit(name, 12, 150, f"gate label {name}")
+        s += t(gx, cy + 46, name, 12, p["pass_"] if ok else p["fail"], anchor="middle",
+               family=MONO, weight="600")
+    for (ic, label, col), x in zip(STAGES, xs):
+        s += tile(x, cy, T, ic, p[col], p, label=label, solid=(label == "done"),
+                  badge=(label == "draft"))
+    s += arc(645, cy - 26, 512, cy - T / 2, 92, p["fail"])
+    s += pill(578, cy - 112, "fail: redo draft only", p["fail"], p)
     return s
 
 
 def hero(p) -> str:
-    W, H = 1280, 420
-    s = header(W, H, p, "Stage gate loops",
-               "Four stages, each ending in a gate that must pass before the next stage runs")
-    return s + hero_body(p) + "</svg>\n"
+    return frame(1280, 420, p, "stage gate loops",
+                 "Four stages in a row with a checkpoint between each. The checkpoint after draft "
+                 "fails, and only the draft stage runs again.") + hero_body(p) + "</svg>\n"
 
 
 def social(p) -> str:
-    """1280x640 card for link previews. The background must fill the whole
-    canvas: a preview that is cropped to 640 with a white band at the bottom
-    looks broken in every chat client."""
-    W, H = 1280, 640
-    s = header(W, H, p, "Stage gate loops", "Check every step. Stop at the first failure.")
-    return s + f'<g transform="translate(0,{(H - 420) / 2:.0f})">' + hero_body(p) + "</g></svg>\n"
+    """1280x640 link preview. Its own canvas, so the background fills all of it."""
+    return (frame(1280, 640, p, "stage gate loops", "Check every step. Stop at the first failure.")
+            + hero_body(p, title_size=40, top=100) + "</svg>\n")
 
 
-# --------------------------------------------------------------------------- flow
+# --------------------------------------------------------------------------- one gate, up close
 def flow(p) -> str:
-    W, H = 1280, 640
-    s = header(W, H, p, "How a run flows",
-               "Stage three fails a gate and retries; the rest is skipped")
-    s += rect(40, 30, 1200, 42, p["line"], r=8, fill=p["panel"])
-    s += t(60, 58, "sgl run pipeline.yaml", 14, p["ink"], weight="700")
+    W, H = 1280, 400
+    s = frame(W, H, p, "One gate, up close",
+              "A stage runs, a gate checks the result. Exit 0 moves on to the next stage. "
+              "Anything else sends the error back to the same stage, which tries again.")
+    s += t(64, 60, "ONE GATE, UP CLOSE", 12, p["muted"], family=MONO, weight="700", spacing="1.5")
+    cy = 228
+    A, B, C = 240, 640, 1040
+    s += track(A + 70, B - 82, cy, p)
+    s += (f'<path d="M{B + 70} {cy}H{C - 82}" stroke="{p["pass_"]}" stroke-width="2.6" '
+          f'stroke-linecap="round" marker-end="url(#ag)"/>')
+    s += pill((B + C) / 2 - 6, cy - 26, "exit 0", p["pass_"], p, filled=True)
+    s += arc(B - 24, cy - 66, A + 24, cy - 60, 92, p["fail"])
+    s += pill((A + B) / 2, cy - 140, "fail: error goes back", p["fail"], p, filled=True)
 
-    y, bh = 100, 78
-    steps = [
-        ("1", "preflight", "pass", p["pass_"]),
-        ("2", "research", "pass", p["pass_"]),
-        ("3", "draft", "fail", p["fail"]),
-        ("3", "draft (retry)", "pass", p["pass_"]),
-        ("4", "publish", "pass", p["pass_"]),
-    ]
-    x0, bw, gap = 48, 210, 36
-    for i, (num, name, verdict, col) in enumerate(steps):
-        x = x0 + i * (bw + gap)
-        s += rect(x, y, bw, bh, col, r=9, sw=1.6)
-        s += t(x + 12, y + 22, f"STAGE {num}", 10, p["muted"], weight="700")
-        s += t(x + bw - 12, y + 22, verdict.upper(), 10, col, anchor="end", weight="700")
-        fit(name, 15, bw - 24, f"flow name {name}")
-        s += t(x + 12, y + 46, name, 15, p["ink"], weight="700", family=SANS)
-        note = "gate passed" if verdict == "pass" and "retry" not in name else (
-            "gate failed" if verdict == "fail" else "gate passed")
-        s += t(x + 12, y + 66, note, 10, col)
-        if i + 1 < len(steps):
-            s += arrow(x + bw + 3, y + bh / 2, x + bw + gap - 4, y + bh / 2, p["muted"])
+    s += tile(A, cy, 120, "bot", p["purple"], p)
+    s += t(A, cy + 96, "stage runs", 17, p["ink"], anchor="middle", weight="700")
+    s += t(A, cy + 120, "agent, script or job", 13, p["muted"], anchor="middle")
 
-    # detail box, centred under the failing card, with clearance from the row
-    fx = x0 + 2 * (bw + gap)
-    s += f'<path d="M{fx + bw / 2} {y + bh} v26" stroke="{p["fail"]}" stroke-width="1.6" marker-end="url(#af)"/>'
-    bwid, bhgt = 820, 158
-    bxx = fx + bw / 2 - bwid / 2 + 60
-    s += rect(bxx, 232, bwid, bhgt, p["fail"], r=10, sw=1.5, fill=p["panel"])
-    s += t(bxx + 22, 262, "Gate output, handed back to the agent as $SGL_FEEDBACK", 13,
-           p["fail"], weight="700")
-    lines = [
-        "PASS: exists, frontmatter, no-filler, length",
-        f"FAIL: 1 banned match(es) {EM} retry with feedback",
-        f"out/post.md:7: /\\u2014/ in: ...check their work at the end ({EM})...",
-    ]
-    for j, ln in enumerate(lines):
-        fit(ln, 12, bwid - 44, f"detail {j}")
-        s += t(bxx + 22, 288 + j * 24, ln, 12, p["ink"])
-    s += t(bxx + 22, 288 + 3 * 24 + 4, "Only stage 3 runs again.", 12, p["brand"], weight="700")
+    s += f'<circle cx="{B}" cy="{cy}" r="62" fill="{p["bg"]}" filter="url(#sh)"/>'
+    s += (f'<circle cx="{B}" cy="{cy}" r="62" fill="{p["blue"]}" fill-opacity="0.09" '
+          f'stroke="{p["blue"]}" stroke-opacity="0.5" stroke-width="1.8"/>')
+    s += icon("terminal", B, cy, 52, p["blue"])
+    s += t(B, cy + 96, "gate checks", 17, p["ink"], anchor="middle", weight="700")
+    s += t(B, cy + 120, "tests · schema · lint · any command", 13, p["muted"], anchor="middle")
 
-    # why it is cheaper
-    s += rect(40, 430, 1200, 120, p["line"], r=10, fill=p["panel"])
-    s += t(64, 462, "Why this is cheaper", 15, p["ink"], weight="700", family=SANS)
-    old = "Old way: run all four stages, check at the end, find the problem, pay for all four again."
-    new = "Here: the failure is caught at stage 3, and only stage 3 runs a second time."
-    for j, ln in enumerate([old, new]):
-        fit(ln, 12, 1140, f"cost line {j}")
-        s += t(64, 492 + j * 24, ("&#10007; " if j == 0 else "&#10003; ") + ln, 12,
-               p["fail"] if j == 0 else p["pass_"])
-    s += t(64, 492 + 2 * 24 + 12, "The publish stage above never sees a bad draft.", 11, p["muted"])
+    s += tile(C, cy, 120, "arrow", p["pass_"], p, solid=True)
+    s += t(C, cy + 96, "next stage", 17, p["ink"], anchor="middle", weight="700")
+    s += t(C, cy + 120, "only after a pass", 13, p["muted"], anchor="middle")
     return s + "</svg>\n"
 
 
-# --------------------------------------------------------------------------- compare
+# --------------------------------------------------------------------------- two ways
 def compare(p) -> str:
-    W, H = 1220, 500
-    s = header(W, H, p, "Two ways to verify a loop",
-               "Verifying at the end against verifying at every transition")
-    pw, ph, px, py = 560, 400, 40, 46
-    for i, (title, colour, note) in enumerate([
-        ("End-of-run check", p["fail"], "verify once, at the end"),
-        ("Stage gates", p["pass_"], "verify at every transition"),
-    ]):
-        x = px + i * (pw + 20)
-        s += rect(x, py, pw, ph, colour, r=12, sw=1.8, fill=p["panel"])
-        s += t(x + 26, py + 34, title, 20, p["ink"], weight="700", family=SANS)
-        s += t(x + 26, py + 56, note, 12, p["muted"])
+    W, H = 1280, 440
+    s = frame(W, H, p, "Two ways to verify a loop",
+              "Checking once at the end reruns all four stages after a failure. "
+              "A gate after every stage reruns only the stage that failed.")
+    icons = [st[0] for st in STAGES[:3]] + ["flag"]
+    cols = [p[st[2]] for st in STAGES[:3]] + [p["muted"]]
+    cy, T = 236, 68
 
-    # ---- left: four stages, one check at the end, everything runs again
-    x = px
-    bw, bh, gap = 96, 52, 12
-    y0 = py + 80
-    for i in range(4):
-        cx = x + 26 + i * (bw + gap)
-        s += rect(cx, y0, bw, bh, p["line"], r=7)
-        s += t(cx + bw / 2, y0 + 31, f"stage {i + 1}", 11, p["ink"], anchor="middle")
-        if i < 3:
-            s += arrow(cx + bw + 2, y0 + bh / 2, cx + bw + gap - 3, y0 + bh / 2, p["muted"])
-    cx = x + 26 + 4 * (bw + gap)
-    s += rect(cx, y0, 92, bh, p["fail"], r=7, sw=1.8)
-    s += t(cx + 46, y0 + 25, "check", 11, p["ink"], anchor="middle", weight="700")
-    s += t(cx + 46, y0 + 42, "fails", 10, p["fail"], anchor="middle")
+    def rail(x1, x2):  # one quiet connector behind a row; the order reads left to right
+        return (f'<path d="M{x1} {cy}H{x2}" stroke="{p["muted"]}" stroke-opacity="0.45" '
+                f'stroke-width="2.2" stroke-linecap="round"/>')
 
-    # loop-back arrow, drawn in clear space below the row
-    ly = y0 + bh + 26
-    s += f'<path d="M{cx + 46} {y0 + bh} v14" stroke="{p["fail"]}" stroke-width="1.6" marker-end="url(#af)"/>'
-    s += f'<path d="M{x + 26 + 3} {ly} h{cx + 46 - (x + 26) - 6}" stroke="{p["fail"]}" ' \
-         f'stroke-width="1.6" stroke-dasharray="5 4" fill="none"/>'
-    s += f'<path d="M{x + 26 + 3} {ly} v-14" stroke="{p["fail"]}" stroke-width="1.6" marker-end="url(#af)"/>'
-    s += t(x + 200, ly + 22, "every stage runs again", 12, p["fail"], anchor="middle", weight="700")
-    fit("every stage runs again", 12, 300, "loop label")
+    def card(x, colour, ok, title):
+        c = (f'<rect x="{x}" y="36" width="590" height="{H - 72}" rx="18" fill="{colour}" fill-opacity="0.035" '
+             f'stroke="{colour}" stroke-opacity="0.4" stroke-width="1.5"/>')
+        c += icon("check" if ok else "x", x + 44, 82, 24, colour, sw=2.8)
+        return c + t(x + 68, 90, title, 22, p["ink"], weight="800")
 
-    for j, ln in enumerate(["The work is done in full.",
-                            "The check happens at the end.",
-                            "It fails.",
-                            "All four stages run a second time."]):
-        s += t(x + 26, py + 190 + j * 26, f"{j + 1}.", 12, p["muted"])
-        fit(ln, 12, pw - 90, f"left {j}")
-        s += t(x + 50, py + 190 + j * 26, ln, 12, p["ink"])
-    s += t(x + 26, py + 190 + 4 * 26 + 22, "Paid for work that was already wrong.",
-           13, p["fail"], weight="700", family=SANS)
-    s += t(x + 26, py + 190 + 4 * 26 + 46, "The failure is found last, when it costs the most.",
-           11, p["muted"])
+    # left: four stages, then one check at the very end
+    s += card(40, p["fail"], False, "Check at the end")
+    lx = [112, 216, 320, 424]
+    s += rail(lx[0], 560)
+    for ic, col, x in zip(icons, cols, lx):
+        s += tile(x, cy, T, ic, col, p, badge=True)
+    s += gate(560, cy, 24, False, p)
+    s += arc(560, cy - 28, lx[0] + 10, cy - T / 2, 96, p["fail"])
+    s += pill(336, cy - 112, "rerun everything", p["fail"], p)
+    s += t(84, 362, "4×", 60, p["fail"], weight="800", spacing="-1")
+    s += t(172, 344, "stages run again", 17, p["ink"], weight="700")
+    s += t(172, 368, "the error is found last", 14, p["muted"])
 
-    # ---- right: each stage followed by its own gate
-    x2 = px + pw + 20
-    for i in range(4):
-        yy = py + 80 + i * 62
-        s += rect(x2 + 26, yy, 230, 46, p["line"], r=7)
-        s += t(x2 + 40, yy + 29, f"stage {i + 1}", 12, p["ink"])
-        s += arrow(x2 + 258, yy + 23, x2 + 278, yy + 23, p["muted"])
-        s += rect(x2 + 282, yy, 150, 46, p["pass_"], r=7, sw=1.5)
-        s += t(x2 + 357, yy + 29, "&#10003; gate", 12, p["pass_"], anchor="middle", weight="700")
-        if i < 3:
-            s += f'<path d="M{x2 + 434} {yy + 23} h16 v62 h-424" stroke="{p["muted"]}" ' \
-                 f'stroke-width="1.4" fill="none" marker-end="url(#a)"/>'
-        else:
-            s += t(x2 + 444, yy + 28, "done", 11, p["pass_"], weight="700")
-    # the failure branch, in the gap between rows
-    s += f'<path d="M{x2 + 300} {py + 80 + 46} v14" stroke="{p["fail"]}" stroke-width="1.5" marker-end="url(#af)"/>'
-    s += t(x2 + 310, py + 80 + 58, "a gate fails: stop and rerun it", 11, p["fail"])
-    fit("a gate fails: stop and rerun it", 11, pw - 300, "right fail label")
-    s += t(x2 + 26, py + 190 + 4 * 26 + 22, "Paid for one stage, once.",
-           13, p["pass_"], weight="700", family=SANS)
-    s += t(x2 + 26, py + 190 + 4 * 26 + 46, "The failure is found at the step that caused it.",
-           11, p["muted"])
+    # right: a gate between every pair of stages
+    s += card(650, p["pass_"], True, "Gate every stage")
+    rx = [714, 862, 1010, 1158]
+    s += rail(rx[0], rx[3])
+    for i, (ic, col, x) in enumerate(zip(icons, cols, rx)):
+        s += tile(x, cy, T, ic, col, p, badge=(i == 1))
+    for i in range(3):
+        s += gate((rx[i] + rx[i + 1]) / 2, cy, 17, i != 1, p)
+    gx = (rx[1] + rx[2]) / 2
+    s += arc(gx, cy - 21, rx[1] + 10, cy - T / 2, 70, p["fail"])
+    s += pill((gx + rx[1]) / 2, cy - 98, "rerun one", p["fail"], p)
+    s += t(694, 362, "1×", 60, p["pass_"], weight="800", spacing="-1")
+    s += t(782, 344, "stage runs again", 17, p["ink"], weight="700")
+    s += t(782, 368, "the error is found where it happened", 14, p["muted"])
     return s + "</svg>\n"
 
 
 # --------------------------------------------------------------------------- benchmark
+# bench/bench.py sim, default arguments (4 stages x 3,000 tokens, 25% fail, 3 tries, 20,000 trials)
+END_TOKENS, END_DONE = 25927, 67.9
+GATE_TOKENS, GATE_DONE = 15394, 93.8
+
+
 def benchmark(p) -> str:
-    W, H = 1040, 500
-    s = header(W, H, p, "Benchmark: tokens per successful run",
-               "Modelled over 20,000 seeded trials of the same four-stage pipeline")
-    s += t(40, 66, "Same pipeline, same failure rate, two strategies", 19, p["ink"],
-           weight="700", family=SANS)
-    sub = "Model: 4 stages x 3,000 tokens, 25% chance a stage fails per attempt, 3 attempts"
-    fit(sub, 12, 960, "bench sub")
-    s += t(40, 92, sub, 12, p["muted"])
+    W, H = 1280, 360
+    pct = round(GATE_TOKENS * 100 / END_TOKENS)
+    s = frame(W, H, p, "Benchmark (simulation)",
+              f"Stage gates used {pct}% of the tokens of an end-of-run check, "
+              f"and {GATE_DONE}% of runs finished against {END_DONE}%.")
+    s += icon("coin", 84, 92, 34, p["pass_"])
+    s += t(64, 214, f"{pct}%", 112, p["pass_"], weight="800", spacing="-4")
+    s += t(68, 252, "of the tokens", 20, p["ink"], weight="700")
+    s += t(68, 278, "with gates on every stage", 14, p["muted"])
 
-    x0, bw, bh = 360, 300, 90
-    for i, (label, val, note, col) in enumerate([
-        ("End-of-run check", 25927, "67.9% of runs finished", p["fail"]),
-        ("Stage gates", 15394, "93.8% of runs finished", p["pass_"]),
-    ]):
-        y = 140 + i * 130
-        s += t(40, y + 34, label, 17, p["ink"], weight="700", family=SANS)
-        s += t(40, y + 58, note, 12, p["muted"])
-        barw = bw * val / 30000
-        # a light track makes the bar's length readable, and a tinted fill keeps
-        # it solid in both themes (a bare stroke looked empty on white)
-        s += rect(x0, y, bw, bh, p["line"], r=7, sw=1, fill=p["zebra"])
-        s += f'<rect x="{x0}" y="{y}" width="{barw:.0f}" height="{bh}" rx="7" fill="{col}" opacity="0.18"/>'
-        s += rect(x0, y, barw, bh, col, r=7, sw=1.6)
-        s += t(x0 + bw + 20, y + 46, f"{val:,}", 22, col, weight="700")
-        s += t(x0 + bw + 20, y + 68, "tokens", 11, p["muted"])
-
-    s += rect(40, 406, 960, 64, p["line"], r=10, fill=p["panel"])
-    head = "Stage gates used 59% of the tokens and finished far more often."
-    fit(head, 14, 920, "bench head")
-    s += t(64, 432, head, 14, p["ink"], weight="700", family=SANS)
-    foot = "Modelled control-flow numbers, not a model measurement. See bench/README.md."
-    fit(foot, 11, 920, "bench foot")
-    s += t(64, 452, foot, 11, p["muted"])
+    x0, bw, bh = 470, 560, 40
+    rows = [("Check at the end", END_TOKENS, END_DONE, p["fail"], "x", 86),
+            ("Gate every stage", GATE_TOKENS, GATE_DONE, p["pass_"], "check", 196)]
+    for label, val, done, col, ic, y in rows:
+        s += icon(ic, x0 + 10, y - 2, 20, col, sw=3)
+        s += t(x0 + 30, y + 4, label, 16, p["ink"], weight="700")
+        s += (f'<rect x="{x0}" y="{y + 18}" width="{bw}" height="{bh}" rx="{bh / 2}" '
+              f'fill="{p["panel"]}" stroke="{p["line"]}"/>')
+        barw = bw * val / END_TOKENS
+        s += (f'<rect x="{x0}" y="{y + 18}" width="{barw:.0f}" height="{bh}" rx="{bh / 2}" '
+              f'fill="{col}" fill-opacity="0.85"/>')
+        s += t(x0 + bw + 24, y + 46, f"{val / 1000:.1f}k", 28, col, weight="800")
+        fit(f"{done}% finish", 13, 140, "bench finish")
+        s += t(x0 + bw + 24, y + 68, f"{done}% finish", 13, p["muted"], family=MONO)
+    foot = "simulation · 4 stages · 3,000 tokens each · 25% fail · 3 tries · 20,000 runs"
+    fit(foot, 12, 1150, "bench foot")
+    s += t(64, 330, foot, 12, p["muted"], family=MONO)
     return s + "</svg>\n"
 
 
 # --------------------------------------------------------------------------- terminal
-def terminal(p) -> str:
+def terminal(_p) -> str:
+    """A real run of examples/blog-publish, copied from the terminal."""
+    q = TERM
     lines = [
-        ("sgl run pipeline.yaml", p["ink"], "700"),
-        ("  [1] preflight: PASS  |  gates: tools", p["pass_"], "400"),
-        ("  [2] research: PASS  |  gates: brief-schema", p["pass_"], "400"),
-        (f"  [3] draft: FAIL at gate 'no-em-dash'  |  retrying with feedback", p["fail"], "400"),
-        (f"        out/post.md:7: /\\u2014/ in: ...check their work at the end ({EM})...",
-         p["muted"], "400"),
-        ("  [3] draft: PASS (attempt 2)  |  gates: exists, frontmatter, no-em-dash",
-         p["pass_"], "400"),
-        ("  [4] publish: PASS  |  gates: published", p["pass_"], "400"),
-        ("ALL GATES PASSED (0.86s)", p["ink"], "700"),
+        ("$ sgl run pipeline.yaml", q["muted"], "400", None),
+        ("sgl ▸ blog-publish  (4 stages)", q["accent"], "700", None),
+        ("  [1] preflight: PASS  gates: tools", q["pass_"], "400", None),
+        ("  [2] research: PASS  gates: brief-schema", q["pass_"], "400", None),
+        ("  [3] draft: FAIL at gate 'no-em-dash'  → retrying with feedback", q["fail"], "700", "caught"),
+        (f"        out/post.md:7: /\\u2014/ in: Most agent loops check their work at the end {EM} after...",
+         q["muted"], "400", None),
+        ("  [3] draft: PASS (attempt 2)  gates: exists, frontmatter, no-em-dash, no-filler, length",
+         q["pass_"], "700", "fixed"),
+        ("  [4] publish: PASS  gates: published", q["pass_"], "400", None),
+        ("sgl ▸ ALL GATES PASSED (0.8s)", q["accent"], "700", None),
     ]
-    W = 1140
-    H = 56 + len(lines) * 27 + 30
-    s = header(W, H, p, "A real sgl run",
-               "Stage three fails a gate, the failure goes back, only that stage reruns")
-    s += rect(28, 26, W - 56, H - 52, p["line"], r=10, fill=p["panel"])
-    for i, c in enumerate([p["fail"], "#d4a72c", p["pass_"]]):
-        s += f'<circle cx="{52 + i * 18}" cy="50" r="5.5" fill="{c}"/>'
-    for i, (ln, col, weight) in enumerate(lines):
-        fit(ln, 13, W - 120, f"term {i}")
-        s += t(50, 88 + i * 27, ln, 13, col, weight=weight)
+    W, lh, top = 1280, 31, 96
+    H = top + len(lines) * lh + 34
+    s = f'''<svg xmlns="http://www.w3.org/2000/svg" width="{W}" height="{H}" viewBox="0 0 {W} {H}"
+  role="img" aria-labelledby="t" aria-describedby="d">
+  <title id="t">A real sgl run</title><desc id="d">The draft stage fails the no-em-dash gate, gets the exact
+  failing line back, passes on attempt 2, and the run finishes.</desc>
+  <rect width="{W}" height="{H}" rx="18" fill="{q['bg']}"/>
+  <path d="M18 0H{W - 18}A18 18 0 0 1 {W} 18V52H0V18A18 18 0 0 1 18 0z" fill="{q['bar']}"/>
+  <path d="M0 52H{W}" stroke="{q['line']}"/>
+  <rect x="0.75" y="0.75" width="{W - 1.5}" height="{H - 1.5}" rx="18" fill="none" stroke="{q['line']}" stroke-width="1.5"/>
+'''
+    for i, c in enumerate(["#ff5f57", "#febc2e", "#28c840"]):
+        s += f'<circle cx="{30 + i * 22}" cy="26" r="6.5" fill="{c}"/>'
+    s += t(W / 2, 31, "examples/blog-publish", 13, q["muted"], anchor="middle", family=MONO)
+    for i, (ln, col, wt, tag) in enumerate(lines):
+        y = top + i * lh
+        if tag:
+            c = q["fail"] if tag == "caught" else q["pass_"]
+            s += f'<rect x="20" y="{y - 21}" width="{W - 40}" height="{lh - 1}" rx="7" fill="{c}" fill-opacity="0.12"/>'
+            s += f'<rect x="20" y="{y - 21}" width="4" height="{lh - 1}" rx="2" fill="{c}"/>'
+            s += pill(W - 82, y - 6, tag, c, dict(bg=q["bg"]), size=12, filled=True)
+        fit(ln.replace(EM, "-"), 14.5, W - 200, f"term line {i}")
+        s += t(44, y, ln.replace("'", "&#39;"), 14.5, col, family=MONO, weight=wt)
     return s + "</svg>\n"
 
 
 # --------------------------------------------------------------------------- logo
 def logo(p) -> str:
-    W, H = 340, 130
-    s = header(W, H, p, "stage-gate-loops", "Two posts and a bar: a gate you pass through")
-    s += gate_mark(52, 34, 2.4, p)
-    s += t(132, 68, "stage-gate-loops", 17, p["ink"], weight="700", family=SANS)
-    s += t(132, 90, "deterministic gates", 11, p["muted"])
+    W, H = 420, 120
+    s = frame(W, H, p, "stage-gate-loops", "Two posts and a bar: a gate you pass through", dots=False)
+    s += mark(40, 38, 1.9, p["pass_"])
+    s += t(108, 70, "stage gate loops", 26, p["ink"], weight="800", spacing="-0.3")
+    s += t(109, 92, "check every step", 13, p["muted"], family=MONO)
     return s + "</svg>\n"
 
 

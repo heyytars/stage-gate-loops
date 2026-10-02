@@ -1,20 +1,20 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="340" height="130" viewBox="0 0 340 130"
+<svg xmlns="http://www.w3.org/2000/svg" width="420" height="120" viewBox="0 0 420 120"
   role="img" aria-labelledby="t" aria-describedby="d">
   <title id="t">stage-gate-loops</title><desc id="d">Two posts and a bar: a gate you pass through</desc>
   <defs>
-    <marker id="a" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-      <path d="M0 0 L10 5 L0 10 z" fill="#59636e"/>
-    </marker>
-    <marker id="af" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto">
-      <path d="M0 0 L10 5 L0 10 z" fill="#cf222e"/>
-    </marker>
+    <pattern id="dots" width="24" height="24" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.1" fill="#e3e8ed"/>
+    </pattern>
+    <filter id="sh" x="-30%" y="-30%" width="160%" height="170%">
+      <feDropShadow dx="0" dy="6" stdDeviation="9" flood-color="#000" flood-opacity="0.08"/>
+    </filter>
+    <marker id="am" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0L10 5L0 10z" fill="#59636e"/></marker>
+    <marker id="ag" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0L10 5L0 10z" fill="#1a7f37"/></marker>
+    <marker id="ar" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto">
+      <path d="M0 0L10 5L0 10z" fill="#cf222e"/></marker>
   </defs>
-  <rect width="340" height="130" rx="12" fill="#ffffff"/>
-  <rect x="0.75" y="0.75" width="338.5" height="128.5" rx="11" fill="none"
-        stroke="#d1d9e0" stroke-width="1.5"/>
-<g transform="translate(52,34) scale(2.4)" stroke="#1a7f37" stroke-width="2.2"
-     fill="none" stroke-linecap="round">
-  <path d="M2 2 v16 M22 2 v16"/>
-  <path d="M2 10 h20" stroke-width="2.6"/>
-  <circle cx="12" cy="10" r="3.2" fill="#1a7f37" stroke="none"/>
-</g><text x="132" y="68" font-size="17" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif" fill="#1f2328" font-weight="700">stage-gate-loops</text><text x="132" y="90" font-size="11" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" fill="#59636e" font-weight="400">deterministic gates</text></svg>
+  <rect x="0.75" y="0.75" width="418.5" height="118.5" rx="20" fill="#ffffff" stroke="#d1d9e0" stroke-width="1.5"/>
+  
+<g transform="translate(40,38) scale(1.9)" stroke="#1a7f37" stroke-width="2.4" fill="none" stroke-linecap="round"><path d="M2 2v18M24 2v18"/><path d="M2 11h22" stroke-width="2.8"/><circle cx="13" cy="11" r="3.6" fill="#1a7f37" stroke="none"/></g><text x="108" y="70" font-size="26" font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans', Helvetica, Arial, sans-serif" fill="#1f2328" font-weight="800" letter-spacing="-0.3" xml:space="preserve" style="white-space:pre">stage gate loops</text><text x="109" y="92" font-size="13" font-family="ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace" fill="#59636e" font-weight="400" xml:space="preserve" style="white-space:pre">check every step</text></svg>

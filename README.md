@@ -37,7 +37,7 @@ The examples use offline stub agents, so they run free and give the same result 
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/how-it-works-dark.svg">
-  <img src="assets/how-it-works-light.svg" alt="A run flows through five stage cards; the third fails its gate, the failure is handed back, and only that stage reruns" width="100%">
+  <img src="assets/how-it-works-light.svg" alt="One gate up close: a stage runs, the gate checks it, exit 0 moves on to the next stage, and a failure sends the error back to the same stage" width="100%">
 </picture>
 
 Each stage runs its command, then its gates in order. When a gate fails:
@@ -104,7 +104,7 @@ Your own gates are just commands: `pytest`, `tsc --noEmit`, `ruff check`, `gitle
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="assets/benchmark-dark.svg">
-  <img src="assets/benchmark-light.svg" alt="Benchmark: end-of-run check costs 25,927 tokens with 67.9% finishing, stage gates cost 15,394 tokens with 93.8% finishing" width="100%">
+  <img src="assets/benchmark-light.svg" alt="Simulation: gating every stage used 59% of the tokens. Check at the end: 25.9k tokens, 67.9% of runs finish. Gate every stage: 15.4k tokens, 93.8% finish" width="100%">
 </picture>
 
 That is a **model of the control flow**, not a measurement of a model: four stages, 3,000 tokens per stage run, a 25% chance a stage fails on an attempt, 3 attempts, 20,000 seeded trials. It shows what gates do on their own, because a failure costs one stage instead of the whole run. At a 10% failure rate the saving shrinks to 24%. **The more often a stage breaks, the more gates are worth.** Change the numbers to match your own loop:
