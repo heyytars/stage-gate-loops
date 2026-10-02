@@ -24,6 +24,15 @@ What `sgl` protects you from, and what it doesn't:
 
 Redaction is a safety net, not a guarantee. The real rule: **don't make gates print secrets.**
 
+## Limits of the built-in scan
+
+This repo scans its own history with gitleaks (rules pinned to v8.30.1 in [`.gitleaks.toml`](.gitleaks.toml)), and the only allowlisted path is `tests/test_sgl.py`, which holds deliberately fake tokens so the redaction tests have something to catch. A real secret anywhere else still fails the build.
+
+Two honest limits of that scan:
+
+1. **Entropy, not knowledge.** gitleaks flags tokens that look random. A low-entropy placeholder such as `ghp_AAAA...` passes, and so would a real secret with an unusual format. It is a net, not a proof.
+2. **What it cannot see.** A secret that only ever lived in a deleted file, a fork, or your laptop's shell history is outside any scan this repo can run.
+
 ## How this repo checks itself
 
 Every push runs this repo's own stage gates ([`.sgl.yaml`](.sgl.yaml)): a gitleaks scan of the full history, bandit static analysis, the test suite, and a docs check. Third-party GitHub Actions are pinned to full commit SHAs, the gitleaks download is checksum-verified, and the workflow token is read-only. Dependabot watches dependencies and actions.
